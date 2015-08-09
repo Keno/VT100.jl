@@ -1,9 +1,38 @@
 module VT100
 
+using Color
+using FixedPointNumbers
+
+typealias RGB8 RGB{Ufixed8}
+
 export Emulator, parse!
 import Base: convert, write
 import Base.Terminals: cmove_right
-import Base: start, next, done
+import Base: start, next, done, setindex!, getindex, endof
+
+module Attributes
+    export Bright, Dim, Underscore, Blink,
+        Reverse, Hidden, Italics, IsACS
+    const Bright        = 0x1
+    const Dim           = 0x2
+    const Underscore    = 0x4
+    const Blink         = 0x8
+    const Reverse       = 0x10
+    const Hidden        = 0x20
+    const Italics       = 0x40
+    const IsACS         = 0x80
+end
+
+module Flags
+    export FG_IS_256, BG_IS_256,
+           FG_IS_RGB, BG_IS_RGB,
+           CELL_IS_IMG
+    const FG_IS_256     = 0x1
+    const BG_IS_256     = 0x2
+    const FG_IS_RGB     = 0x4
+    const BG_IS_RGB     = 0x8
+    const CELL_IS_IMG   = 0x10
+end
 
 # One terminal cell on the screen. Needs to take care of
 # the contents of the screen as well as the coloring.
@@ -14,7 +43,41 @@ immutable Cell
     # (PUP15) and maintain a separate Array of sequences to be filled in when
     # encountering one of these.
     content::Char
+    flags::Uint8
+    fg::UInt8
+    bg::Uint8
+    attrs::UInt8
+    fg_rgb::RGB8
+    bg_rgb::RGB8
+end
+Cell(c::Cell;
+        content = c.content, flags = c.flags, fg = c.fg, bg = c.bg,
+        attrs = c.attrs, fg_rgb = c.fg_rgb, bg_rgb = c.bg_rgb) =
+    Cell(content,flags,fg,bg,attrs,fg_rgb,bg_rgb)
+Cell(c::Char) = Cell(c,0,0,0,0,RGB{Ufixed8}(0,0,0),RGB{Ufixed8}(0,0,0))
 
+# Encode x information if foreground color, y information in background color
+# r encodes the lowest 8 bits, g the next, b the hight bits
+function color_for_int(x)
+    @assert (x & ~0xFFFFFF) == 0
+    RGB8(
+        Ufixed8(UInt8( x      & 0xFF),nothing),
+        Ufixed8(UInt8((x>> 8) & 0xFF),nothing),
+        Ufixed8(UInt8((x>>16) & 0xFF),nothing)
+    )
+end
+
+function decode_color(c::RGB8)
+    UInt8(c.r.i) | (UInt32(UInt8(c.g.i)) << 8) | (UInt32(UInt8(c.b.i)) << 16)
+end
+
+function get_image_cell(c::Cell, x, y)
+    Cell(c, fg_rgb = color_for_int(x),
+        bg_rgb = color_for_int(y), flags = Flags.CELL_IS_IMG)
+end
+
+function pos_for_image_cell(c::Cell)
+    (decode_color(c.fg_rgb),decode_color(c.bg_rgb))
 end
 
 type Line
@@ -26,6 +89,9 @@ end
 start(l::Line) = start(l.data)
 next(l::Line,i) = next(l.data,i)
 done(l::Line,i) = done(l.data,i)
+setindex!(l::Line, c, i) = setindex!(l.data, c, i)
+getindex(l::Line,i) = getindex(l.data,i)
+endof(l::Line) = endof(l.data)
 
 convert(::Type{Line}, data::Vector{Cell}) = Line(data)
 
@@ -105,7 +171,7 @@ end
 # Line Drawing Character Set
 const LineDrawing = [
     # see http://vt100.net/docs/vt100-ug/table3-9.html
-    [Char(0x00):Char(0x5e)]; # Octal 0 - 136 are regular ASCII characters
+    collect(Char(0x00):Char(0x5e)); # Octal 0 - 136 are regular ASCII characters
     # Actual characters chosen for compatibilty with iterm
     # genrated using write(STDOUT,"\e(0",char(i),"\e(A")
     Char(0x0a);              # Blank Space
@@ -113,7 +179,7 @@ const LineDrawing = [
     '┘';'┐';'┌';'└';'┼';'⎺';'⎻';'─';'─';'⎼';
     '├';'┤';'┴';'┬';'│';'≤';'≥';'π';'≠';'£';
     '·';
-    [Char(0x00):Char(0x5e)]; # Octal 0 - 136 are regular ASCII characters
+    collect(Char(0x00):Char(0x5e)); # Octal 0 - 136 are regular ASCII characters
 ]
 
 # Maintains an array of UTF8 sequences for combining characters, etc. Indexed
@@ -219,7 +285,7 @@ function readdec(io)
         elseif n == 0
             return (c, -1)
         else
-            return (c, parseint(takebuf_string(decbuf),10))
+            return (c, parse(Int,takebuf_string(decbuf),10))
         end
         n += 1
     end
