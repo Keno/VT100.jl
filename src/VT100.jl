@@ -1,3 +1,5 @@
+VERSION >= v"0.4.0-dev+6641" && __precompile__()
+
 module VT100
 
 using Color
@@ -5,7 +7,7 @@ using FixedPointNumbers
 
 typealias RGB8 RGB{Ufixed8}
 
-export Emulator, parse!
+export LineEmulator, Emulator, parse!, parse_cell!
 import Base: convert, write
 import Base.Terminals: cmove_right
 import Base: start, next, done, setindex!, getindex, endof
@@ -22,6 +24,7 @@ module Attributes
     const Italics       = 0x40
     const IsACS         = 0x80
 end
+using .Attributes
 
 module Flags
     export FG_IS_256, BG_IS_256,
@@ -43,9 +46,9 @@ immutable Cell
     # (PUP15) and maintain a separate Array of sequences to be filled in when
     # encountering one of these.
     content::Char
-    flags::Uint8
+    flags::UInt8
     fg::UInt8
-    bg::Uint8
+    bg::UInt8
     attrs::UInt8
     fg_rgb::RGB8
     bg_rgb::RGB8
@@ -105,7 +108,9 @@ immutable Size
     height::Int
 end
 
-type Emulator
+abstract Emulator
+
+type ScreenEmulator <: Emulator
     ViewPortSize::Size
     firstline::Int
     ExtendedContents::Vector{UTF8String}
@@ -119,14 +124,28 @@ type Emulator
         this
     end
 end
-cmove(e::Emulator, line, col) =
+cmove(e::ScreenEmulator, line, col) =
     e.cursor = Cursor(e.firstline-1+line, col)
-cmove_right(e::Emulator, n) =
+cmove_right(e::ScreenEmulator, n) =
     e.cursor = Cursor(e.cursor.line, e.cursor.column+n)
-cmove_col(e::Emulator, n) =
+cmove_col(e::ScreenEmulator, n) =
     e.cursor = Cursor(e.cursor.line, n)
-cmove_down(e::Emulator, n) =
+cmove_down(e::ScreenEmulator, n) =
     e.cursor = Cursor(e.cursor.line + n, e.cursor.column)
+
+# An emulator that works a line at a time and does not support screen movement
+# commands
+type LineEmulator <: Emulator
+    cur_cell::Cell
+    linedrawing::Bool
+    LineEmulator(cur_cell::Cell) = new(cur_cell,false)
+end
+create_cell(em::LineEmulator,c::Char) = Cell(em.cur_cell, content = c)
+write(em::LineEmulator, c) = 1
+cur_cell(em::LineEmulator) = em.cur_cell
+set_cur_cell(em::LineEmulator,c::Cell) = em.cur_cell = c
+insert_line!(em::LineEmulator) = nothing
+cmove_down(em::LineEmulator,_) = nothing
 
 # Erase is inclusive the cursor position.
 erase_eol(em) = resize!(em.lines[em.cursor.line].data, em.cursor.column-1)
@@ -259,13 +278,13 @@ function add_line!(em::Emulator, pos)
 end
 insert_line!(em::Emulator) = add_line!(em::Emulator, em.cursor.line + 1)
 
-function write(em::Emulator, c::Cell)
+function write(em::ScreenEmulator, c::Cell)
     insert_cell!(em,em.cursor.column,c)
     cmove_right(em, 1)
 end
 
 # Writing characters (non-control)
-function write(em::Emulator, c::Char)
+function write(em::ScreenEmulator, c::Char)
     write(em,Cell(c))
 end
 
@@ -291,109 +310,144 @@ function readdec(io)
     end
 end
 
+const colorsInOrder =
+    [:black, :red, :green, :yellow, :blue, :magenta, :cyan, :white]
+function process_CSIm(em,f1)
+    cell = cur_cell(em)
+    if f1 == 0
+        set_cur_cell(em,Cell(Cell('\0'),fg=9,bg=9))
+    elseif f1 == 1
+        set_cur_cell(em,Cell(cell,attrs=cell.attrs | Bright))
+    elseif 30 <= f1 <= 39
+        set_cur_cell(em,Cell(cell,fg = f1-30))
+    elseif 40 <= f1 <= 49
+        set_cur_cell(em,Cell(cell,bg = f1-40))
+    else
+        error("Unimplemented")
+    end
+end
+
+# Parse everything and append it to the emulator
+function parseall!(em::Emulator,io::IO)
+    while !eof(io::IO)
+        parse!(em,io)
+    end
+end
+
+# Parse until we have gotten a full cell that needs to be printed
+function parse_cell!(em::Emulator, io::IO)
+    local c
+    while !eof(io) && (c = parse!(em,io)).content == 0
+    end
+    c
+end
+
 function parse!(em::Emulator, io::IO)
-    while !eof(io)
+    c = read(io, Char)
+    if c == '\r'
+        cmove_col(em, 1)
+    elseif c == '\n'
+        insert_line!(em)
+        cmove_down(em, 1)
+    elseif c == '\e'
         c = read(io, Char)
-        if c == '\r'
-            cmove_col(em, 1)
-        elseif c == '\n'
-            insert_line!(em)
-            cmove_down(em, 1)
-        elseif c == '\e'
-            c = read(io, Char)
-            if c == '['
-                (c,f1) = readdec(io)
-                n = f1 == -1 ? 1 : f1
+        if c == '['
+            (c,f1) = readdec(io)
+            n = f1 == -1 ? 1 : f1
+            if c == ';'
+                (c,f2) = readdec(io)
+                n2 = f2 == -1 ? 1 : f2
                 if c == ';'
-                    (c,f2) = readdec(io)
-                    n2 = f2 == -1 ? 1 : f2
-                    if c == ';'
-                        fs = [f1,f2]
-                        while c == ';'
-                            (c,f) = readdec(io)
-                            push!(fs, f)
-                        end
+                    fs = [f1,f2]
+                    while c == ';'
+                        (c,f) = readdec(io)
+                        push!(fs, f)
                     end
-                    if c == 'H'             # CUP (two arg)
-                        cmove(em, n, n2)
-                    elseif c == 'm'
-                        # error("TODO: Color")
-                    elseif c == 'r'
-                        # error("TODO: DECSTBM")
-                    else
-                        error("TODO: $(hex(c))")
-                    end
-                elseif c == '?'
-                    (c,f2) = readdec(io)
-                elseif c == 'A'             # CUU
-                    cmove_up(em, n)
-                elseif c == 'B'             # CUD
-                    cmove_down(em, n)
-                elseif c == 'C'             # CUF
-                    cmove_right(em, n)
-                elseif c == 'D'             # CUB
-                    cmove_left(em, n)
-                elseif c == 'E'             # CNL
-                    cmove_line_down(em,n)
-                elseif c == 'F'             # CPL
-                    cmove_line_up(em,n)
-                elseif c == 'G'             # CHA
-                    cmove_col(em, n)
-                elseif c == 'H'             # CUP (one arg)
-                    cmove(em, n, 1)
-                elseif c == 'K'
-                    if f1 == -1 || f1 == 0  # \e[K
-                        erase_eol(em)
-                    elseif f1 == 1          # \e[1K
-                        erase_sol(em)
-                    elseif f1 == 2          # \e[2K
-                        erase_line(em)
-                    else
-                        error("Unknown erase command")
-                    end
-                elseif c== 'J'
-                    if f1 == -1 || f1 == 0  # \e[J
-                        erase_bos(em)
-                    elseif f1 == 1          # \e[1J
-                        erase_tos(em)
-                    elseif f1 == 2          # \e[2J
-                        erase_screen(em)
-                    else
-                        error("Unknown erase command")
-                    end
-                elseif c == 'S' || c== 'T'
-                    error("TODO: Scroll")
+                end
+                if c == 'H'             # CUP (two arg)
+                    cmove(em, n, n2)
                 elseif c == 'm'
                     # error("TODO: Color")
-                elseif c == 'l'
-                    # error("TODO: l")
-                elseif c == 'X'             # ECH
-                    erase_n(em,n)
+                elseif c == 'r'
+                    # error("TODO: DECSTBM")
                 else
-                    error("Unimplemented CSI $c")
+                    error("TODO: $(hex(c))")
                 end
-            elseif c == '('
-                c = read(io,Char)
-                if c == 'B'
-                    em.linedrawing = false
-                elseif c == '0'
-                    em.linedrawing = true
+            elseif c == '?'
+                (c,f2) = readdec(io)
+            elseif c == 'A'             # CUU
+                cmove_up(em, n)
+            elseif c == 'B'             # CUD
+                cmove_down(em, n)
+            elseif c == 'C'             # CUF
+                cmove_right(em, n)
+            elseif c == 'D'             # CUB
+                cmove_left(em, n)
+            elseif c == 'E'             # CNL
+                cmove_line_down(em,n)
+            elseif c == 'F'             # CPL
+                cmove_line_up(em,n)
+            elseif c == 'G'             # CHA
+                cmove_col(em, n)
+            elseif c == 'H'             # CUP (one arg)
+                cmove(em, n, 1)
+            elseif c == 'K'
+                if f1 == -1 || f1 == 0  # \e[K
+                    erase_eol(em)
+                elseif f1 == 1          # \e[1K
+                    erase_sol(em)
+                elseif f1 == 2          # \e[2K
+                    erase_line(em)
                 else
-                    error("Unimplemented \\e($c")
+                    error("Unknown erase command")
                 end
-            elseif c == '='
-                # DECKPAM
+            elseif c== 'J'
+                if f1 == -1 || f1 == 0  # \e[J
+                    erase_bos(em)
+                elseif f1 == 1          # \e[1J
+                    erase_tos(em)
+                elseif f1 == 2          # \e[2J
+                    erase_screen(em)
+                else
+                    error("Unknown erase command")
+                end
+            elseif c == 'S' || c== 'T'
+                error("TODO: Scroll")
+            elseif c == 'm'
+                process_CSIm(em,f1)
+            elseif c == 'l'
+                # error("TODO: l")
+            elseif c == 'X'             # ECH
+                erase_n(em,n)
             else
-                error("Unhandled escape sequence starting with $c")
+                error("Unimplemented CSI $c")
             end
+        elseif c == '('
+            c = read(io,Char)
+            if c == 'B'
+                em.linedrawing = false
+            elseif c == '0'
+                em.linedrawing = true
+            else
+                error("Unimplemented \\e($c")
+            end
+        elseif c == '='
+            # DECKPAM
         else
-            if em.linedrawing && c < 0xff
-                write(em, LineDrawing[UInt8(c)+1])
-            else
-                write(em, c)
-            end
+            error("Unhandled escape sequence starting with $c")
+        end
+    else
+        if em.linedrawing && c < 0xff
+            cell = create_cell(em,LineDrawing[UInt8(c)+1])
+            write(em, cell)
+            return cell
+        else
+            cell = create_cell(em,c)
+            write(em, cell)
+            return cell
         end
     end
+    return Cell('\0')
 end
 
 @unix_only begin
@@ -421,7 +475,7 @@ end
         master = Base.TTY(RawFD(fdm); readable = true)
 
         pty = PTY(Emulator(), master, slave)
-        parse && @async parse!(pty.em,master)
+        parse && @async parseall!(pty.em,master)
 
         finalizer(pty, close)
         pty
