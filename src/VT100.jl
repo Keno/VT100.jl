@@ -2,7 +2,7 @@ VERSION >= v"0.4.0-dev+6641" && __precompile__()
 
 module VT100
 
-using Color
+using Colors
 using FixedPointNumbers
 
 typealias RGB8 RGB{Ufixed8}
