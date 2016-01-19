@@ -5,7 +5,7 @@ for test in [
     "basic/hello", "basic/hello-nocr", "basic/long",
     "basic/color", "basic/boserase"
 ]
-    em = Emulator(80,24)
+    em = ScreenEmulator(80,24)
     basepath = joinpath(dirname(@__FILE__),test)
     if isfile(string(basepath,".raw.in"))
         open(f->parse!(em,f),string(basepath,".raw.in"))
@@ -25,5 +25,3 @@ for test in [
         println(UTF8String(outbuf))
     end
 end
-
-

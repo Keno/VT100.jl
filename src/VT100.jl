@@ -5,9 +5,9 @@ module VT100
 using Colors
 using FixedPointNumbers
 
-typealias RGB8 RGB{Ufixed8}
+typealias RGB8 RGB{UFixed8}
 
-export LineEmulator, Emulator, parse!, parse_cell!
+export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell
 import Base: convert, write
 import Base.Terminals: cmove_right
 import Base: start, next, done, setindex!, getindex, endof
@@ -57,16 +57,16 @@ Cell(c::Cell;
         content = c.content, flags = c.flags, fg = c.fg, bg = c.bg,
         attrs = c.attrs, fg_rgb = c.fg_rgb, bg_rgb = c.bg_rgb) =
     Cell(content,flags,fg,bg,attrs,fg_rgb,bg_rgb)
-Cell(c::Char) = Cell(c,0,0,0,0,RGB{Ufixed8}(0,0,0),RGB{Ufixed8}(0,0,0))
+Cell(c::Char) = Cell(c,0,0,0,0,RGB{UFixed8}(0,0,0),RGB{UFixed8}(0,0,0))
 
 # Encode x information if foreground color, y information in background color
 # r encodes the lowest 8 bits, g the next, b the hight bits
 function color_for_int(x)
     @assert (x & ~0xFFFFFF) == 0
     RGB8(
-        Ufixed8(UInt8( x      & 0xFF),nothing),
-        Ufixed8(UInt8((x>> 8) & 0xFF),nothing),
-        Ufixed8(UInt8((x>>16) & 0xFF),nothing)
+        UFixed8(UInt8( x      & 0xFF),nothing),
+        UFixed8(UInt8((x>> 8) & 0xFF),nothing),
+        UFixed8(UInt8((x>>16) & 0xFF),nothing)
     )
 end
 
@@ -116,29 +116,48 @@ type ScreenEmulator <: Emulator
     ExtendedContents::Vector{UTF8String}
     lines::Vector{Line}
     cursor::Cursor
+    cur_cell::Cell
+    debug::Bool
     linedrawing::Bool
-    function Emulator(width = 80, height = 24)
+    function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
-            Vector{UTF8String}(0),Vector{Line}(0),Cursor(1,1))
+            Vector{UTF8String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
+            false)
         add_line!(this)
         this
     end
 end
-cmove(e::ScreenEmulator, line, col) =
-    e.cursor = Cursor(e.firstline-1+line, col)
-cmove_right(e::ScreenEmulator, n) =
-    e.cursor = Cursor(e.cursor.line, e.cursor.column+n)
-cmove_col(e::ScreenEmulator, n) =
-    e.cursor = Cursor(e.cursor.line, n)
-cmove_down(e::ScreenEmulator, n) =
-    e.cursor = Cursor(e.cursor.line + n, e.cursor.column)
+create_cell(em::ScreenEmulator,c::Char) = Cell(em.cur_cell, content = c)
+cur_cell(em::ScreenEmulator) = em.cur_cell
+set_cur_cell(em::ScreenEmulator,c::Cell) = em.cur_cell = c
+function cmove(em::ScreenEmulator, line, col)
+    em.debug && println("Moving to $line:$col")
+    targetline = em.firstline-1+line
+    for _ in targetline:-1:(length(em.lines)+1)
+        add_line!(em)
+    end
+    em.cursor = Cursor(targetline, col)
+end
+function cmove_right(em::ScreenEmulator, n)
+    em.debug && println("Moving $n right")
+    em.cursor = Cursor(em.cursor.line, em.cursor.column+n)
+end
+function cmove_col(em::ScreenEmulator, n)
+    em.debug && println("Moving to col $n")
+    em.cursor = Cursor(em.cursor.line, n)
+end
+function cmove_down(em::ScreenEmulator, n)
+    em.debug && println("Moving $n down")
+    em.cursor = Cursor(em.cursor.line + n, em.cursor.column)
+end
 
 # An emulator that works a line at a time and does not support screen movement
 # commands
 type LineEmulator <: Emulator
     cur_cell::Cell
     linedrawing::Bool
-    LineEmulator(cur_cell::Cell) = new(cur_cell,false)
+    debug::Bool
+    LineEmulator(cur_cell::Cell) = new(cur_cell,false,false)
 end
 create_cell(em::LineEmulator,c::Char) = Cell(em.cur_cell, content = c)
 write(em::LineEmulator, c) = 1
@@ -155,6 +174,7 @@ function erase_sol(em)
     end
 end
 function erase_n(em,n)
+    em.debug && println("Erasing $n characters")
     for i = em.cursor.column:(em.cursor.column+(n-1))
         if i < length(em.lines[em.cursor.line].data)
             em.lines[em.cursor.line].data[i] = Cell(' ')
@@ -285,6 +305,7 @@ end
 
 # Writing characters (non-control)
 function write(em::ScreenEmulator, c::Char)
+    em.debug && println(c,"Writing ",repr(c))
     write(em,Cell(c))
 end
 
@@ -315,12 +336,15 @@ const colorsInOrder =
 function process_CSIm(em,f1)
     cell = cur_cell(em)
     if f1 == 0
+        em.debug && println("Change color to default")
         set_cur_cell(em,Cell(Cell('\0'),fg=9,bg=9))
     elseif f1 == 1
         set_cur_cell(em,Cell(cell,attrs=cell.attrs | Bright))
     elseif 30 <= f1 <= 39
+        em.debug && println("Change fg color")
         set_cur_cell(em,Cell(cell,fg = f1-30))
     elseif 40 <= f1 <= 49
+        em.debug && println("Change bg color")
         set_cur_cell(em,Cell(cell,bg = f1-40))
     else
         error("Unimplemented")
@@ -343,6 +367,7 @@ function parse_cell!(em::Emulator, io::IO)
 end
 
 function parse!(em::Emulator, io::IO)
+    const debug = true
     c = read(io, Char)
     if c == '\r'
         cmove_col(em, 1)
@@ -425,8 +450,10 @@ function parse!(em::Emulator, io::IO)
         elseif c == '('
             c = read(io,Char)
             if c == 'B'
+                em.debug && println("Disable linedrawing")
                 em.linedrawing = false
             elseif c == '0'
+                em.debug && println("Enable linedrawing")
                 em.linedrawing = true
             else
                 error("Unimplemented \\e($c")
