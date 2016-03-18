@@ -7,7 +7,8 @@ using FixedPointNumbers
 
 typealias RGB8 RGB{UFixed8}
 
-export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell
+export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
+    parseall!
 import Base: convert, write
 import Base.Terminals: cmove_right
 import Base: start, next, done, setindex!, getindex, endof
@@ -122,7 +123,7 @@ type ScreenEmulator <: Emulator
     function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
             Vector{UTF8String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
-            false)
+            false, false)
         add_line!(this)
         this
     end
