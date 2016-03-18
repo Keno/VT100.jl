@@ -1,5 +1,6 @@
 using VT100
 using Base.Test
+using Compat
 
 failed_tests = 0
 for test in [
