@@ -1,6 +1,6 @@
 using VT100
 using Base.Test
-using Compat
+using Compat; import Compat.String
 
 failed_tests = 0
 for test in [
@@ -25,8 +25,8 @@ for test in [
         failed_tests += 1
         println(output)
         println(outbuf)
-        println(UTF8String(output))
-        println(UTF8String(outbuf))
+        println(String(output))
+        println(String(outbuf))
     end
 end
 exit(failed_tests)
