@@ -4,6 +4,7 @@ module VT100
 
 using Colors
 using FixedPointNumbers
+import Compat.String
 
 typealias RGB8 RGB{UFixed8}
 
@@ -114,7 +115,7 @@ abstract Emulator
 type ScreenEmulator <: Emulator
     ViewPortSize::Size
     firstline::Int
-    ExtendedContents::Vector{UTF8String}
+    ExtendedContents::Vector{String}
     lines::Vector{Line}
     cursor::Cursor
     cur_cell::Cell
@@ -122,7 +123,7 @@ type ScreenEmulator <: Emulator
     linedrawing::Bool
     function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
-            Vector{UTF8String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
+            Vector{String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
             false, false)
         add_line!(this)
         this
@@ -224,7 +225,7 @@ const LineDrawing = [
 
 # Maintains an array of UTF8 sequences for combining characters, etc. Indexed
 # by C-U+F0000
-const ExtendedContents = UTF8String[]
+const ExtendedContents = String[]
 
 # Render the contents of this emulator into another terminal.
 function render(term::IO, em::Emulator)

@@ -25,8 +25,8 @@ for test in [
         failed_tests += 1
         println(output)
         println(outbuf)
-        println(UTF8String(output))
-        println(UTF8String(outbuf))
+        println(Compat.UTF8String(output))
+        println(Compat.UTF8String(outbuf))
     end
 end
 exit(failed_tests)
