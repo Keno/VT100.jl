@@ -244,7 +244,7 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing)
         end
         for cell in line
             c = cell.content
-            if c < 0xF0000
+            if c < '\Uf0000'
                 write(contents,c)
             else
                 write(contents,em.ExtendedContents[c])
