@@ -2,6 +2,7 @@ VERSION >= v"0.4.0-dev+6641" && __precompile__()
 
 module VT100
 
+using Compat; import Compat.String
 using Colors
 using FixedPointNumbers
 
@@ -114,7 +115,7 @@ abstract Emulator
 type ScreenEmulator <: Emulator
     ViewPortSize::Size
     firstline::Int
-    ExtendedContents::Vector{UTF8String}
+    ExtendedContents::Vector{String}
     lines::Vector{Line}
     cursor::Cursor
     cur_cell::Cell
@@ -122,7 +123,7 @@ type ScreenEmulator <: Emulator
     linedrawing::Bool
     function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
-            Vector{UTF8String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
+            Vector{String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
             false, false)
         add_line!(this)
         this
@@ -224,7 +225,7 @@ const LineDrawing = [
 
 # Maintains an array of UTF8 sequences for combining characters, etc. Indexed
 # by C-U+F0000
-const ExtendedContents = UTF8String[]
+const ExtendedContents = String[]
 
 # Render the contents of this emulator into another terminal.
 function render(term::IO, em::Emulator)
@@ -243,7 +244,7 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing)
         end
         for cell in line
             c = cell.content
-            if c < 0xF0000
+            if c < '\Uf0000'
                 write(contents,c)
             else
                 write(contents,em.ExtendedContents[c])
