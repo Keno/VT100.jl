@@ -479,7 +479,7 @@ function parse!(em::Emulator, io::IO)
     return Cell('\0')
 end
 
-@unix_only begin
+@static if is_unix()
     type PTY
         em::Emulator
         master::Base.TTY
