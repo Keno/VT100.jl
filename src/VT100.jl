@@ -4,7 +4,7 @@ module VT100
 
 using Colors
 using FixedPointNumbers
-
+using Compat
 import Compat.String
 
 typealias RGB8 RGB{UFixed8}
