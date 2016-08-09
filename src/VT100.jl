@@ -364,7 +364,7 @@ end
 # Parse until we have gotten a full cell that needs to be printed
 function parse_cell!(em::Emulator, io::IO)
     local c
-    while !eof(io) && (c = parse!(em,io)).content == 0
+    while !eof(io) && (c = parse!(em,io)).content == Char(0)
     end
     c
 end
