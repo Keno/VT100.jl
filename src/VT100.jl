@@ -39,6 +39,7 @@ module Flags
     const BG_IS_RGB     = 0x8
     const CELL_IS_IMG   = 0x10
 end
+using .Flags
 
 # One terminal cell on the screen. Needs to take care of
 # the contents of the screen as well as the coloring.
@@ -56,10 +57,26 @@ immutable Cell
     fg_rgb::RGB8
     bg_rgb::RGB8
 end
-Cell(c::Cell;
+
+const colorlist = Dict(
+    :black      => 0,
+    :red        => 1,
+    :green      => 2,
+    :yellow     => 3,
+    :blue       => 4,
+    :magenta    => 5,
+    :cyan       => 6,
+    :white      => 7,
+    :default    => 9
+)
+
+function Cell(c::Cell;
         content = c.content, flags = c.flags, fg = c.fg, bg = c.bg,
-        attrs = c.attrs, fg_rgb = c.fg_rgb, bg_rgb = c.bg_rgb) =
+        attrs = c.attrs, fg_rgb = c.fg_rgb, bg_rgb = c.bg_rgb)
+    isa(fg, Symbol) && (fg = colorlist[fg]; flags & ~(FG_IS_256 | FG_IS_RGB))
+    isa(bg, Symbol) && (bg = colorlist[bg]; flags & ~(BG_IS_256 | BG_IS_RGB))
     Cell(content,flags,fg,bg,attrs,fg_rgb,bg_rgb)
+end
 Cell(c::Char) = Cell(c,0,0,0,0,RGB{UFixed8}(0,0,0),RGB{UFixed8}(0,0,0))
 
 # Encode x information if foreground color, y information in background color
@@ -207,6 +224,7 @@ function add_line!(em::Emulator)
     a = Array(Cell, 0)
     sizehint!(a, 80)
     push!(em.lines, a)
+    em.debug && println("Adding line to emulator")
 end
 
 
@@ -235,13 +253,16 @@ end
 
 # Dump the emulator contents as a plain-contents text file and a decorator file
 # Intended mostly for regression testing.
-function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing)
+const default_decorators = ['A':'z';'a':'z';'0':'9']
+function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing, decorator_map = Dict{Cell,Char}(),
+        available_decorators = copy(default_decorators))
     first = true
     for line in (lines === nothing ? em.lines : em.lines[lines])
         if first
             first = false
         else
             println(contents)
+            println(decorator)
         end
         for cell in line
             c = cell.content
@@ -250,6 +271,13 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing)
             else
                 write(contents,em.ExtendedContents[c])
             end
+            # Write decorator
+            template = Cell(cell,content='\0')
+            if !haskey(decorator_map, template)
+                decorator_char = shift!(available_decorators)
+                decorator_map[template] = decorator_char
+            end
+            write(decorator, decorator_map[template])
         end
     end
 end
@@ -295,8 +323,10 @@ function add_line!(em::Emulator, pos)
     sizehint!(a, 80)
     l = length(em.lines)
     if pos > l + 1
+        em.debug && println("Inserting $(pos-1-(l+1)) lines")
         fill_lines(em,l+1,pos-1)
     end
+    em.debug && println("Inserting line (now $(length(em.lines)) lines)")
     insert!(em.lines, pos, a)
 end
 insert_line!(em::Emulator) = add_line!(em::Emulator, em.cursor.line + 1)
@@ -334,8 +364,6 @@ function readdec(io)
     end
 end
 
-const colorsInOrder =
-    [:black, :red, :green, :yellow, :blue, :magenta, :cyan, :white]
 function process_CSIm(em,f1)
     cell = cur_cell(em)
     if f1 == 0
