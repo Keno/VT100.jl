@@ -1,2 +1,2 @@
-*.in text eof=lf
-*.out text eof=lf
+*.in text eol=lf
+*.out text eol=lf
