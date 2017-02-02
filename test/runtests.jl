@@ -18,7 +18,7 @@ for test in [
     output = open(read,string(basepath,".out"))
     buf = IOBuffer()
     VT100.dump(buf,DevNull,em)
-    outbuf = takebuf_array(buf)
+    outbuf = take!(buf)
     if outbuf != output
         print_with_color(:red, "Failed test $test\n")
         failed_tests += 1

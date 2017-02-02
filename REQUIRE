@@ -1,4 +1,4 @@
 julia 0.5
-Colors
-Compat 0.7.15
+ColorTypes 0.3.0
+Compat 0.9.5
 FixedPointNumbers 0.3.0

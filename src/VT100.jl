@@ -2,7 +2,7 @@ __precompile__()
 
 module VT100
 
-using Colors
+using ColorTypes
 using FixedPointNumbers
 
 typealias RGB8 RGB{N0f8}
@@ -75,7 +75,7 @@ function Cell(c::Cell;
     isa(bg, Symbol) && (bg = colorlist[bg]; flags & ~(BG_IS_256 | BG_IS_RGB))
     Cell(content,flags,fg,bg,attrs,fg_rgb,bg_rgb)
 end
-Cell(c::Char) = Cell(c,0,0,0,0,RGB{N0f8}(0,0,0),RGB{N0f8}(0,0,0))
+Cell(c::Char) = Cell(c,0,0,0,0,RGB8(0,0,0),RGB8(0,0,0))
 
 # Encode x information if foreground color, y information in background color
 # r encodes the lowest 8 bits, g the next, b the hight bits
@@ -219,7 +219,7 @@ function erase_screen(em)
 end
 
 function add_line!(em::Emulator)
-    a = Array(Cell, 0)
+    a = Array{Cell}(0)
     sizehint!(a, 80)
     push!(em.lines, a)
     em.debug && println("Adding line to emulator")
@@ -317,7 +317,7 @@ function fill_lines(em, from, to)
 end
 
 function add_line!(em::Emulator, pos)
-    a = Array(Cell, 0)
+    a = Array{Cell}(0)
     sizehint!(a, 80)
     l = length(em.lines)
     if pos > l + 1
@@ -356,7 +356,7 @@ function readdec(io)
         elseif n == 0
             return (c, -1)
         else
-            return (c, parse(Int,takebuf_string(decbuf),10))
+            return (c, parse(Int, String(take!(decbuf)),10))
         end
         n += 1
     end
@@ -389,7 +389,7 @@ end
 
 # Parse until we have gotten a full cell that needs to be printed
 function parse_cell!(em::Emulator, io::IO)
-    local c
+    c = Cell('\0')
     while !eof(io) && (c = parse!(em,io)).content == Char(0)
     end
     c
