@@ -1,13 +1,11 @@
-VERSION >= v"0.4.0-dev+6641" && __precompile__()
+__precompile__()
 
 module VT100
 
 using Colors
 using FixedPointNumbers
-using Compat
-import Compat.String
 
-typealias RGB8 RGB{UFixed8}
+typealias RGB8 RGB{N0f8}
 
 export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
     parseall!
@@ -77,16 +75,16 @@ function Cell(c::Cell;
     isa(bg, Symbol) && (bg = colorlist[bg]; flags & ~(BG_IS_256 | BG_IS_RGB))
     Cell(content,flags,fg,bg,attrs,fg_rgb,bg_rgb)
 end
-Cell(c::Char) = Cell(c,0,0,0,0,RGB{UFixed8}(0,0,0),RGB{UFixed8}(0,0,0))
+Cell(c::Char) = Cell(c,0,0,0,0,RGB{N0f8}(0,0,0),RGB{N0f8}(0,0,0))
 
 # Encode x information if foreground color, y information in background color
 # r encodes the lowest 8 bits, g the next, b the hight bits
 function color_for_int(x)
     @assert (x & ~0xFFFFFF) == 0
     RGB8(
-        UFixed8(UInt8( x      & 0xFF),nothing),
-        UFixed8(UInt8((x>> 8) & 0xFF),nothing),
-        UFixed8(UInt8((x>>16) & 0xFF),nothing)
+        N0f8(UInt8( x      & 0xFF),nothing),
+        N0f8(UInt8((x>> 8) & 0xFF),nothing),
+        N0f8(UInt8((x>>16) & 0xFF),nothing)
     )
 end
 
