@@ -20,3 +20,9 @@ VT100.dump(buf,DevNull,em)
 # buf now contains the screen contents of the emulator
 ```
 For more examples, see the test directory.
+
+# Usage for terminal regression tests
+
+VT100 ships with the `test/TerminalRegressionTests.jl` collection of utilities
+to simplify writing regression tests for terminal applications. The API for
+this is currently in flux, but you may find it useful.

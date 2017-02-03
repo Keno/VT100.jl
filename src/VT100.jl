@@ -135,12 +135,13 @@ type ScreenEmulator <: Emulator
     lines::Vector{Line}
     cursor::Cursor
     cur_cell::Cell
-    debug::Bool
+    debug::Bool # Log what we're doing
+    warn::Bool # Complain about bad data
     linedrawing::Bool
     function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
             Vector{String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
-            false, false)
+            false, false, false)
         add_line!(this)
         this
     end
@@ -154,6 +155,7 @@ function cmove(em::ScreenEmulator, line, col)
     for _ in targetline:-1:(length(em.lines)+1)
         add_line!(em)
     end
+    @assert col >= 1
     em.cursor = Cursor(targetline, col)
 end
 function cmove_right(em::ScreenEmulator, n)
@@ -161,6 +163,10 @@ function cmove_right(em::ScreenEmulator, n)
     em.cursor = Cursor(em.cursor.line, em.cursor.column+n)
 end
 function cmove_col(em::ScreenEmulator, n)
+    if n == 0
+        em.warn && println(STDERR, "BAD DATA: Columns are 1 indexed.")
+        n = 1
+    end
     em.debug && println("Moving to col $n")
     em.cursor = Cursor(em.cursor.line, n)
 end
@@ -281,6 +287,7 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing, decora
 end
 
 function fill_space!(line, from, to)
+    @assert to >= 0
     resize!(line.data, to)
     for i = (from:to)
         line.data[i] = Cell(' ')
@@ -310,6 +317,7 @@ function insert_cell!(em, pos, c::Cell)
 end
 
 function fill_lines(em, from, to)
+    @assert to >= 0
     resize!(em.lines, to)
     for i = (from:to)
         em.lines[i] = Line()
@@ -369,6 +377,8 @@ function process_CSIm(em,f1)
         set_cur_cell(em,Cell(Cell('\0'),fg=9,bg=9))
     elseif f1 == 1
         set_cur_cell(em,Cell(cell,attrs=cell.attrs | Bright))
+    elseif f1 == 22
+        set_cur_cell(em,Cell(cell,attrs=cell.attrs & ~(Bright | Dim)))
     elseif 30 <= f1 <= 39
         em.debug && println("Change fg color")
         set_cur_cell(em,Cell(cell,fg = f1-30))
@@ -376,7 +386,7 @@ function process_CSIm(em,f1)
         em.debug && println("Change bg color")
         set_cur_cell(em,Cell(cell,bg = f1-40))
     else
-        error("Unimplemented")
+        error("Unimplemented CSIm $f1")
     end
 end
 
@@ -506,16 +516,17 @@ function parse!(em::Emulator, io::IO)
     return Cell('\0')
 end
 
+
 @static if is_unix()
     type PTY
-        em::Emulator
+        em::ScreenEmulator
         master::Base.TTY
         slave::RawFD
     end
 
     function create_pty(parse = true)
-        const O_RDWR = Base.FS.JL_O_RDWR
-        const O_NOCTTY = Base.FS.JL_O_NOCTTY
+        const O_RDWR = Base.Filesystem.JL_O_RDWR
+        const O_NOCTTY = Base.Filesystem.JL_O_NOCTTY
 
         fdm = ccall(:posix_openpt,Cint,(Cint,),O_RDWR|O_NOCTTY)
         fdm == -1 && error("Failed to open PTY master")
@@ -530,7 +541,7 @@ end
         slave  = RawFD(fds)
         master = Base.TTY(RawFD(fdm); readable = true)
 
-        pty = PTY(Emulator(), master, slave)
+        pty = PTY(ScreenEmulator(), master, slave)
         parse && @async parseall!(pty.em,master)
 
         finalizer(pty, close)
