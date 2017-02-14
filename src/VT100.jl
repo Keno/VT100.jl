@@ -4,8 +4,9 @@ module VT100
 
 using ColorTypes
 using FixedPointNumbers
+using Compat
 
-typealias RGB8 RGB{N0f8}
+const RGB8 = RGB{N0f8}
 
 export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
     parseall!
@@ -126,7 +127,7 @@ immutable Size
     height::Int
 end
 
-abstract Emulator
+@compat abstract type Emulator end
 
 type ScreenEmulator <: Emulator
     ViewPortSize::Size
