@@ -28,4 +28,7 @@ for test in [
         println(String(outbuf))
     end
 end
+
+include("TRTtest.jl")
+
 exit(failed_tests)

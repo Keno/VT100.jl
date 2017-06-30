@@ -38,7 +38,7 @@ module TerminalRegressionTests
         end
         outputs, decorators
     end
-    
+
     type EmulatedTerminal <: Base.Terminals.UnixTerminal
         input_buffer::IOBuffer
         out_stream::Base.TTY
@@ -73,13 +73,22 @@ module TerminalRegressionTests
         term.waiting = false
         read(term.input_buffer, Char)
     end
+    function Base.readuntil(term::EmulatedTerminal, delim::UInt8)
+        if nb_available(term.input_buffer) == 0
+            term.waiting = true
+            notify(term.step)
+            wait(term.filled)
+        end
+        term.waiting = false
+        readuntil(term.input_buffer, delim)
+    end
     Base.Terminals.raw!(t::EmulatedTerminal, raw::Bool) =
         ccall(:jl_tty_set_mode,
                  Int32, (Ptr{Void},Int32),
                  t.out_stream.handle, raw) != -1
     Base.Terminals.pipe_reader(t::EmulatedTerminal) = t.input_buffer
     Base.Terminals.pipe_writer(t::EmulatedTerminal) = t.out_stream
-    
+
     function _compare(output, outbuf)
         result = outbuf == output
         if !result
@@ -115,31 +124,42 @@ module TerminalRegressionTests
         decorator === nothing && return true
         _compare(decorator, decoratorbuf)
     end
-    
+
     function automated_test(f, outputpath, inputs)
         emuterm = EmulatedTerminal()
         emuterm.terminal.warn = true
         outputs, decorators = load_outputs(outputpath)
-        t1 = @async f(emuterm)
+        c = Condition()
+        @async Base.wait_readnb(emuterm.pty.master, typemax(Int64))
+        yield()
+        t1 = @async try
+            f(emuterm)
+            Base.notify(c)
+        catch err
+            Base.showerror(STDERR, err, catch_backtrace())
+            Base.notify_error(c, err)
+        end
         t2 = @async try
-                for input in inputs
-                    wait(emuterm);
-                    @assert emuterm.waiting
-                    output = shift!(outputs)
-                    decorator = isempty(decorators) ? nothing : shift!(decorators)
-                    @assert !eof(emuterm.pty.master)
-                    Base.process_events(false)
-                    while nb_available(emuterm.pty.master) > 0
-                        VT100.parse!(emuterm.terminal, emuterm.pty.master)
-                    end
-                    compare(emuterm.terminal, output, decorator)
-                    print(emuterm.input_buffer, input); notify(emuterm.filled)
+            for input in inputs
+                wait(emuterm);
+                @assert emuterm.waiting
+                output = shift!(outputs)
+                decorator = isempty(decorators) ? nothing : shift!(decorators)
+                @assert !eof(emuterm.pty.master)
+                Base.process_events(false)
+                while nb_available(emuterm.pty.master) > 0
+                    VT100.parse!(emuterm.terminal, emuterm.pty.master)
                 end
-            catch err
-                Base.showerror(STDERR, err, catch_backtrace())
-                rethrow(err)
+                compare(emuterm.terminal, output, decorator)
+                print(emuterm.input_buffer, input); notify(emuterm.filled)
             end
-            
-        wait(t2); wait(t1);
+            Base.notify(c)
+        catch err
+            Base.showerror(STDERR, err, catch_backtrace())
+            Base.notify_error(c, err)
+        end
+        while !istaskdone(t1) || !istaskdone(t2)
+            wait(c)
+        end
     end
 end
