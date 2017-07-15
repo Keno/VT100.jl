@@ -47,6 +47,8 @@ module TerminalRegressionTests
         waiting::Bool
         step::Condition
         filled::Condition
+        # Yield after every write, e.g. to test for flickering issues
+        aggressive_yield::Bool
         function EmulatedTerminal()
             pty = VT100.create_pty(false)
             new(
@@ -60,8 +62,13 @@ module TerminalRegressionTests
             wait(term.step)
         end
     end
-    for T in (Vector{UInt8}, Array, AbstractArray, String, Any, Char)
-        Base.write(term::EmulatedTerminal,a::T) = write(term.out_stream, a)
+    for T in (Vector{UInt8}, Array, AbstractArray, String, Symbol, Any, Char)
+        function Base.write(term::EmulatedTerminal,a::T)
+            write(term.out_stream, a)
+            if term.aggressive_yield
+                notify(term.step)
+            end
+        end
     end
     Base.eof(term::EmulatedTerminal) = false
     function Base.read(term::EmulatedTerminal, ::Type{Char})
@@ -122,11 +129,12 @@ module TerminalRegressionTests
         decoratorbuf = take!(decoratorbuf)
         _compare(Vector{UInt8}(output), outbuf) || return false
         decorator === nothing && return true
-        _compare(decorator, decoratorbuf)
+        _compare(Vector{UInt8}(decorator), decoratorbuf)
     end
 
-    function automated_test(f, outputpath, inputs)
+    function automated_test(f, outputpath, inputs; aggressive_yield = false)
         emuterm = EmulatedTerminal()
+        emuterm.aggressive_yield = aggressive_yield
         emuterm.terminal.warn = true
         outputs, decorators = load_outputs(outputpath)
         c = Condition()
@@ -142,7 +150,7 @@ module TerminalRegressionTests
         t2 = @async try
             for input in inputs
                 wait(emuterm);
-                @assert emuterm.waiting
+                emuterm.aggressive_yield || @assert emuterm.waiting
                 output = shift!(outputs)
                 decorator = isempty(decorators) ? nothing : shift!(decorators)
                 @assert !eof(emuterm.pty.master)
@@ -152,6 +160,54 @@ module TerminalRegressionTests
                 end
                 compare(emuterm.terminal, output, decorator)
                 print(emuterm.input_buffer, input); notify(emuterm.filled)
+            end
+            Base.notify(c)
+        catch err
+            Base.showerror(STDERR, err, catch_backtrace())
+            Base.notify_error(c, err)
+        end
+        while !istaskdone(t1) || !istaskdone(t2)
+            wait(c)
+        end
+    end
+
+    function create_automated_test(f, outputpath, inputs; aggressive_yield=false)
+        emuterm = EmulatedTerminal()
+        emuterm.aggressive_yield = aggressive_yield
+        emuterm.terminal.warn = true
+        c = Condition()
+        @async Base.wait_readnb(emuterm.pty.master, typemax(Int64))
+        yield()
+        t1 = @async try
+            f(emuterm)
+            Base.notify(c)
+        catch err
+            Base.showerror(STDERR, err, catch_backtrace())
+            Base.notify_error(c, err)
+        end
+        t2 = @async try
+            outs = map(inputs) do input
+                wait(emuterm);
+                while nb_available(emuterm.pty.master) > 0
+                    VT100.parse!(emuterm.terminal, emuterm.pty.master)
+                end
+                out = IOBuffer()
+                decorator = IOBuffer()
+                VT100.dump(out, decorator, emuterm.terminal)
+                @show String(out)
+                print(emuterm.input_buffer, input); notify(emuterm.filled)
+                out, decorator
+            end
+            open(outputpath, "w") do io
+                print(io,"+"^50,"\n",
+                    join(map(outs) do x
+                        sprint() do io
+                            out, dec = x
+                            print(io, "|", replace(String(take!(out)),"\n","\n|"))
+                            println(io, "\n", "-"^50)
+                            print(io, "|", replace(String(take!(dec)),"\n","\n|"))
+                        end
+                    end, string('\n',"+"^50,'\n')))
             end
             Base.notify(c)
         catch err

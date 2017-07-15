@@ -15,11 +15,11 @@ import Base.Terminals: cmove_right
 import Base: start, next, done, setindex!, getindex, endof
 
 module Attributes
-    export Bright, Dim, Underscore, Blink,
+    export Bright, Dim, Underline, Blink,
         Reverse, Hidden, Italics, IsACS
     const Bright        = 0x1
     const Dim           = 0x2
-    const Underscore    = 0x4
+    const Underline     = 0x4
     const Blink         = 0x8
     const Reverse       = 0x10
     const Hidden        = 0x20
@@ -174,6 +174,10 @@ end
 function cmove_down(em::ScreenEmulator, n)
     em.debug && println("Moving $n down")
     em.cursor = Cursor(em.cursor.line + n, em.cursor.column)
+end
+function cmove_up(em::ScreenEmulator, n)
+    em.debug && println("Moving $n down")
+    em.cursor = Cursor(em.cursor.line - n, em.cursor.column)
 end
 
 # An emulator that works a line at a time and does not support screen movement
@@ -371,26 +375,6 @@ function readdec(io)
     end
 end
 
-function process_CSIm(em,f1)
-    cell = cur_cell(em)
-    if f1 == 0
-        em.debug && println("Change color to default")
-        set_cur_cell(em,Cell(Cell('\0'),fg=9,bg=9))
-    elseif f1 == 1
-        set_cur_cell(em,Cell(cell,attrs=cell.attrs | Bright))
-    elseif f1 == 22
-        set_cur_cell(em,Cell(cell,attrs=cell.attrs & ~(Bright | Dim)))
-    elseif 30 <= f1 <= 39
-        em.debug && println("Change fg color")
-        set_cur_cell(em,Cell(cell,fg = f1-30))
-    elseif 40 <= f1 <= 49
-        em.debug && println("Change bg color")
-        set_cur_cell(em,Cell(cell,bg = f1-40))
-    else
-        error("Unimplemented CSIm $f1")
-    end
-end
-
 # Parse everything and append it to the emulator
 function parseall!(em::Emulator,io::IO)
     while !eof(io::IO)
@@ -404,6 +388,61 @@ function parse_cell!(em::Emulator, io::IO)
     while !eof(io) && (c = parse!(em,io)).content == Char(0)
     end
     c
+end
+
+function parseSGR!(em::Emulator, params)
+    idx = 1
+    while idx <= length(params)
+        cell = cur_cell(em)
+        f1 = params[idx]
+        if f1 == 0
+            em.debug && println("Change color to default")
+            set_cur_cell(em,Cell(Cell('\0'),fg=9,bg=9))
+        elseif f1 == 1
+            set_cur_cell(em,Cell(cell,attrs=cell.attrs | Bright))
+        elseif f1 == 4
+            set_cur_cell(em,Cell(cell,attrs=cell.attrs | Underline))
+        elseif f1 == 22
+            set_cur_cell(em,Cell(cell,attrs=cell.attrs & ~(Bright | Dim)))
+        elseif 30 <= f1 <= 37 || f1 == 39
+            em.debug && println("Change fg color")
+            set_cur_cell(em,Cell(cell,fg = f1-30))
+        elseif f1 == 38
+            idx += 2
+            f2, f3 = params[(idx-1):idx]
+            if f2 == 2
+                idx += 2
+                f4, f5 = params[(idx-1):idx]
+                set_cur_cell(em,Cell(cell, fg = RGB8(f3, f4, f5), flags=cell.flags | FG_IS_RGB))
+            elseif f2 == 5
+                set_cur_cell(em,Cell(cell, fg = f3, flags=cell.flags | FG_IS_256))
+            else
+                error("Incorrect SGR sequence")
+            end
+        elseif 40 <= f1 <= 47 || f1 == 49
+            em.debug && println("Change bg color")
+            set_cur_cell(em,Cell(cell,bg = f1-40))
+        elseif f1 == 48
+            idx += 2
+            f2, f3 = params[(idx-1):idx]
+            if f2 == 2
+                idx += 2
+                f4, f5 = params[(idx-1):idx]
+                set_cur_cell(em,Cell(cell, bg = RGB8(f3, f4, f5), flags=cell.flags | BG_IS_RGB))
+            elseif f2 == 5
+                set_cur_cell(em,Cell(cell, bg = f3, flags=cell.flags | BG_IS_256))
+            else
+                error("Incorrect SGR sequence")
+            end
+        elseif 90 <= f1 <= 97
+            set_cur_cell(em,Cell(cell,fg = f1-90, attrs=cell.attrs | Bright))
+        elseif 100 <= f1 <= 107
+            set_cur_cell(em,Cell(cell,fg = f1-100, attrs=cell.attrs | Bright))
+        else
+            error("Unimplemented CSIm $f1")
+        end
+        idx += 1
+    end
 end
 
 function parse!(em::Emulator, io::IO)
@@ -420,19 +459,16 @@ function parse!(em::Emulator, io::IO)
             (c,f1) = readdec(io)
             n = f1 == -1 ? 1 : f1
             if c == ';'
-                (c,f2) = readdec(io)
-                n2 = f2 == -1 ? 1 : f2
-                if c == ';'
-                    fs = [f1,f2]
-                    while c == ';'
-                        (c,f) = readdec(io)
-                        push!(fs, f)
-                    end
+                fm = [f1]
+                while c == ';'
+                    (c,fs) = readdec(io)
+                    push!(fm, fs)
                 end
+                n2 = fm[2] == -1 ? 1 : fm[2]
                 if c == 'H'             # CUP (two arg)
                     cmove(em, n, n2)
                 elseif c == 'm'
-                    # error("TODO: Color")
+                    parseSGR!(em, fm)
                 elseif c == 'r'
                     # error("TODO: DECSTBM")
                 else
@@ -479,7 +515,7 @@ function parse!(em::Emulator, io::IO)
             elseif c == 'S' || c== 'T'
                 error("TODO: Scroll")
             elseif c == 'm'
-                process_CSIm(em,f1)
+                parseSGR!(em,(f1,))
             elseif c == 'l'
                 # error("TODO: l")
             elseif c == 'X'             # ECH
