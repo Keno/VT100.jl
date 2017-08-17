@@ -39,7 +39,7 @@ module TerminalRegressionTests
         outputs, decorators
     end
 
-    type EmulatedTerminal <: Base.Terminals.UnixTerminal
+    mutable struct EmulatedTerminal <: Base.Terminals.UnixTerminal
         input_buffer::IOBuffer
         out_stream::Base.TTY
         pty::VT100.PTY
