@@ -42,7 +42,7 @@ using .Flags
 
 # One terminal cell on the screen. Needs to take care of
 # the contents of the screen as well as the coloring.
-immutable Cell
+struct Cell
     # The content to be drawn in this Cell. Unfortunately a terminal emulator
     # also needs to take care of unicode combining characters, which do not fit
     # in a Char. We assign those characters to one of the private use planes
@@ -102,7 +102,7 @@ function pos_for_image_cell(c::Cell)
     (decode_color(c.fg_rgb),decode_color(c.bg_rgb))
 end
 
-type Line
+mutable struct Line
     data::Vector{Cell}
     wrapped::Bool
     Line() = new(Vector{Cell}(0),false)
@@ -117,19 +117,19 @@ endof(l::Line) = endof(l.data)
 
 convert(::Type{Line}, data::Vector{Cell}) = Line(data)
 
-immutable Cursor
+struct Cursor
     line::Int
     column::Int
 end
 
-immutable Size
+struct Size
     width::Int
     height::Int
 end
 
-@compat abstract type Emulator end
+abstract type Emulator end
 
-type ScreenEmulator <: Emulator
+mutable struct ScreenEmulator <: Emulator
     ViewPortSize::Size
     firstline::Int
     ExtendedContents::Vector{String}
@@ -182,7 +182,7 @@ end
 
 # An emulator that works a line at a time and does not support screen movement
 # commands
-type LineEmulator <: Emulator
+mutable struct LineEmulator <: Emulator
     cur_cell::Cell
     linedrawing::Bool
     debug::Bool
