@@ -154,9 +154,13 @@ module TerminalRegressionTests
                 output = shift!(outputs)
                 decorator = isempty(decorators) ? nothing : shift!(decorators)
                 @assert !eof(emuterm.pty.master)
-                Base.process_events(false)
-                while nb_available(emuterm.pty.master) > 0
-                    VT100.parse!(emuterm.terminal, emuterm.pty.master)
+                while true
+                    emuterm.aggressive_yield || yield()
+                    Base.process_events(false)
+                    nb_available(emuterm.pty.master) == 0 && break
+                    while nb_available(emuterm.pty.master) > 0
+                        VT100.parse!(emuterm.terminal, emuterm.pty.master)
+                    end
                 end
                 compare(emuterm.terminal, output, decorator)
                 print(emuterm.input_buffer, input); notify(emuterm.filled)
