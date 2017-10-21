@@ -62,7 +62,7 @@ module TerminalRegressionTests
             wait(term.step)
         end
     end
-    for T in (Vector{UInt8}, Array, AbstractArray, String, Symbol, Any, Char)
+    for T in (Vector{UInt8}, Array, AbstractArray, String, Symbol, Any, Char, UInt8)
         function Base.write(term::EmulatedTerminal,a::T)
             write(term.out_stream, a)
             if term.aggressive_yield
