@@ -559,6 +559,7 @@ end
         em::ScreenEmulator
         master::Base.TTY
         slave::RawFD
+        fdm::RawFD
     end
 
     function create_pty(parse = true)
@@ -578,7 +579,7 @@ end
         slave  = RawFD(fds)
         master = Base.TTY(RawFD(fdm); readable = true)
 
-        pty = PTY(ScreenEmulator(), master, slave)
+        pty = PTY(ScreenEmulator(), master, slave, RawFD(fdm))
         parse && @async parseall!(pty.em,master)
 
         finalizer(pty, close)

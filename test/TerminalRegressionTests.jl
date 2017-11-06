@@ -132,6 +132,27 @@ module TerminalRegressionTests
         _compare(Vector{UInt8}(decorator), decoratorbuf)
     end
 
+    function process_all_buffered(emuterm)
+        # Since writes to the tty are asynchronous, there's an
+        # inherent race condition between them being sent to the
+        # kernel and being available to epoll. We write a sentintel value
+        # here and wait for it to be read back.
+        sentinel = Ref{UInt32}(0xffffffff)
+        ccall(:write, Void, (Cint, Ptr{UInt32}, Csize_t), emuterm.pty.slave, sentinel, sizeof(UInt32))
+        Base.process_events(false)
+        # Read until we get our sentinel
+        while nb_available(emuterm.pty.master) < sizeof(UInt32) ||
+            reinterpret(UInt32, emuterm.pty.master.buffer.data[(emuterm.pty.master.buffer.size-3):emuterm.pty.master.buffer.size])[] != sentinel[]
+            emuterm.aggressive_yield || yield()
+            Base.process_events(false)
+            sleep(0.01)                        
+        end
+        data = IOBuffer(readavailable(emuterm.pty.master)[1:(end-4)])
+        while nb_available(data) > 0
+            VT100.parse!(emuterm.terminal, data)
+        end
+    end
+
     function automated_test(f, outputpath, inputs; aggressive_yield = false)
         emuterm = EmulatedTerminal()
         emuterm.aggressive_yield = aggressive_yield
@@ -154,14 +175,7 @@ module TerminalRegressionTests
                 output = shift!(outputs)
                 decorator = isempty(decorators) ? nothing : shift!(decorators)
                 @assert !eof(emuterm.pty.master)
-                while true
-                    emuterm.aggressive_yield || yield()
-                    Base.process_events(false)
-                    nb_available(emuterm.pty.master) == 0 && break
-                    while nb_available(emuterm.pty.master) > 0
-                        VT100.parse!(emuterm.terminal, emuterm.pty.master)
-                    end
-                end
+                process_all_buffered(emuterm)
                 compare(emuterm.terminal, output, decorator)
                 print(emuterm.input_buffer, input); notify(emuterm.filled)
             end
@@ -174,7 +188,7 @@ module TerminalRegressionTests
             wait(c)
         end
     end
-
+    
     function create_automated_test(f, outputpath, inputs; aggressive_yield=false)
         emuterm = EmulatedTerminal()
         emuterm.aggressive_yield = aggressive_yield
@@ -192,13 +206,13 @@ module TerminalRegressionTests
         t2 = @async try
             outs = map(inputs) do input
                 wait(emuterm);
-                while nb_available(emuterm.pty.master) > 0
-                    VT100.parse!(emuterm.terminal, emuterm.pty.master)
-                end
+                emuterm.aggressive_yield || @assert emuterm.waiting
+                process_all_buffered(emuterm)
                 out = IOBuffer()
                 decorator = IOBuffer()
                 VT100.dump(out, decorator, emuterm.terminal)
                 @show String(out)
+                @show String(input)
                 print(emuterm.input_buffer, input); notify(emuterm.filled)
                 out, decorator
             end
