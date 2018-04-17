@@ -413,7 +413,7 @@ function parseSGR!(em::Emulator, params)
             if f2 == 2
                 idx += 2
                 f4, f5 = params[(idx-1):idx]
-                set_cur_cell(em,Cell(cell, fg = RGB8(f3, f4, f5), flags=cell.flags | FG_IS_RGB))
+                set_cur_cell(em,Cell(cell, fg_rgb = RGB8(N0f8(f3,0), N0f8(f4,0), N0f8(f5,0)), flags=cell.flags | FG_IS_RGB))
             elseif f2 == 5
                 set_cur_cell(em,Cell(cell, fg = f3, flags=cell.flags | FG_IS_256))
             else
@@ -428,7 +428,7 @@ function parseSGR!(em::Emulator, params)
             if f2 == 2
                 idx += 2
                 f4, f5 = params[(idx-1):idx]
-                set_cur_cell(em,Cell(cell, bg = RGB8(f3, f4, f5), flags=cell.flags | BG_IS_RGB))
+                set_cur_cell(em,Cell(cell, bg_rgb = RGB8(N0f8(f3,0), N0f8(f4,0), N0f8(f5,0)), flags=cell.flags | BG_IS_RGB))
             elseif f2 == 5
                 set_cur_cell(em,Cell(cell, bg = f3, flags=cell.flags | BG_IS_256))
             else
