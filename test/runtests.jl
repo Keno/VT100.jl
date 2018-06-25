@@ -1,5 +1,5 @@
 using VT100
-using Base.Test
+using Test
 
 failed_tests = 0
 for test in [
@@ -12,16 +12,16 @@ for test in [
         open(f->(parseall!(em,f)),string(basepath,".raw.in"))
     else
         @assert isfile(string(basepath,".in"))
-        open(f->(parseall!(em,IOBuffer(unescape_string(readstring(f))))),
+        open(f->(parseall!(em,IOBuffer(unescape_string(read(f, String))))),
             string(basepath,".in"))
     end
     output = open(read,string(basepath,".out"))
     buf = IOBuffer()
-    VT100.dump(buf,DevNull,em)
+    VT100.dump(buf,devnull,em)
     outbuf = take!(buf)
     if outbuf != output
         print_with_color(:red, "Failed test $test\n")
-        failed_tests += 1
+        global failed_tests += 1
         println(output)
         println(outbuf)
         println(String(output))

@@ -16,7 +16,7 @@ pty = VT100.create_pty()
 # [Should pass pty.slave to C library, e.g. ncurses here]
 # Now obtain a debug dump of the screen state
 buf = IOBuffer()
-VT100.dump(buf,DevNull,em)
+VT100.dump(buf,devnull,em)
 # buf now contains the screen contents of the emulator
 ```
 For more examples, see the test directory.

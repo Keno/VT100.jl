@@ -4,14 +4,14 @@ module VT100
 
 using ColorTypes
 using FixedPointNumbers
-using Compat
 
 const RGB8 = RGB{N0f8}
 
 export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
     parseall!
 import Base: convert, write
-import Base.Terminals: cmove_right
+import REPL
+import REPL.Terminals: cmove_right
 import Base: start, next, done, setindex!, getindex, endof
 
 module Attributes
@@ -141,7 +141,7 @@ mutable struct ScreenEmulator <: Emulator
     linedrawing::Bool
     function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
-            Vector{String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
+            Vector{String}(),Vector{Line}(),Cursor(1,1),Cell('\0'),
             false, false, false)
         add_line!(this)
         this
@@ -165,7 +165,7 @@ function cmove_right(em::ScreenEmulator, n)
 end
 function cmove_col(em::ScreenEmulator, n)
     if n == 0
-        em.warn && println(STDERR, "BAD DATA: Columns are 1 indexed.")
+        em.warn && println(stderr, "BAD DATA: Columns are 1 indexed.")
         n = 1
     end
     em.debug && println("Moving to col $n")
@@ -230,7 +230,7 @@ function erase_screen(em)
 end
 
 function add_line!(em::Emulator)
-    a = Array{Cell}(0)
+    a = Array{Cell}(undef, 0)
     sizehint!(a, 80)
     push!(em.lines, a)
     em.debug && println("Adding line to emulator")
@@ -257,7 +257,7 @@ const ExtendedContents = String[]
 
 # Render the contents of this emulator into another terminal.
 function render(term::IO, em::Emulator)
-    dump(term,DevNull,em)
+    dump(term,devnull,em)
 end
 
 # Dump the emulator contents as a plain-contents text file and a decorator file
@@ -283,7 +283,7 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing, decora
             # Write decorator
             template = Cell(cell,content='\0')
             if !haskey(decorator_map, template)
-                decorator_char = shift!(available_decorators)
+                decorator_char = popfirst!(available_decorators)
                 decorator_map[template] = decorator_char
             end
             write(decorator, decorator_map[template])
@@ -330,7 +330,7 @@ function fill_lines(em, from, to)
 end
 
 function add_line!(em::Emulator, pos)
-    a = Array{Cell}(0)
+    a = Array{Cell}(undef, 0)
     sizehint!(a, 80)
     l = length(em.lines)
     if pos > l + 1
@@ -369,7 +369,7 @@ function readdec(io)
         elseif n == 0
             return (c, -1)
         else
-            return (c, parse(Int, String(take!(decbuf)),10))
+            return (c, parse(Int, String(take!(decbuf)), base=10))
         end
         n += 1
     end
@@ -446,7 +446,7 @@ function parseSGR!(em::Emulator, params)
 end
 
 function parse!(em::Emulator, io::IO)
-    const debug = true
+    debug = true
     c = read(io, Char)
     if c == '\r'
         cmove_col(em, 1)
@@ -554,18 +554,17 @@ function parse!(em::Emulator, io::IO)
 end
 
 
-@static if is_unix()
-    type PTY
+@static if Sys.isunix()
+    mutable struct PTY
         em::ScreenEmulator
         master::Base.TTY
         slave::RawFD
         fdm::RawFD
     end
 
+    const O_RDWR = Base.Filesystem.JL_O_RDWR
+    const O_NOCTTY = Base.Filesystem.JL_O_NOCTTY
     function create_pty(parse = true)
-        const O_RDWR = Base.Filesystem.JL_O_RDWR
-        const O_NOCTTY = Base.Filesystem.JL_O_NOCTTY
-
         fdm = ccall(:posix_openpt,Cint,(Cint,),O_RDWR|O_NOCTTY)
         fdm == -1 && error("Failed to open PTY master")
         rc = ccall(:grantpt,Cint,(Cint,),fdm)
@@ -582,7 +581,7 @@ end
         pty = PTY(ScreenEmulator(), master, slave, RawFD(fdm))
         parse && @async parseall!(pty.em,master)
 
-        finalizer(pty, close)
+        finalizer(close, pty)
         pty
     end
 
