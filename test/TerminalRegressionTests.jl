@@ -31,7 +31,7 @@ module TerminalRegressionTests
                 continue
             elseif line[1] == '|'
                 array = is_output ? outputs : decorators
-                array[end] = string(array[end],isempty(array[end])?"":"\n",line[2:end])
+                array[end] = string(array[end],isempty(array[end]) ? "" : "\n",line[2:end])
             else
                 error("Unrecognized first character \"$(line[1])\"")
             end
@@ -58,7 +58,7 @@ module TerminalRegressionTests
         end
     end
     function Base.wait(term::EmulatedTerminal)
-        if !term.waiting || nb_available(term.input_buffer) != 0
+        if !term.waiting || bytesavailable(term.input_buffer) != 0
             wait(term.step)
         end
     end
@@ -72,7 +72,7 @@ module TerminalRegressionTests
     end
     Base.eof(term::EmulatedTerminal) = false
     function Base.read(term::EmulatedTerminal, ::Type{Char})
-        if nb_available(term.input_buffer) == 0
+        if bytesavailable(term.input_buffer) == 0
             term.waiting = true
             notify(term.step)
             wait(term.filled)
@@ -81,7 +81,7 @@ module TerminalRegressionTests
         read(term.input_buffer, Char)
     end
     function Base.readuntil(term::EmulatedTerminal, delim::UInt8)
-        if nb_available(term.input_buffer) == 0
+        if bytesavailable(term.input_buffer) == 0
             term.waiting = true
             notify(term.step)
             wait(term.filled)
@@ -91,7 +91,7 @@ module TerminalRegressionTests
     end
     Base.Terminals.raw!(t::EmulatedTerminal, raw::Bool) =
         ccall(:jl_tty_set_mode,
-                 Int32, (Ptr{Void},Int32),
+                 Int32, (Ptr{Cvoid},Int32),
                  t.out_stream.handle, raw) != -1
     Base.Terminals.pipe_reader(t::EmulatedTerminal) = t.input_buffer
     Base.Terminals.pipe_writer(t::EmulatedTerminal) = t.out_stream
@@ -113,7 +113,7 @@ module TerminalRegressionTests
                 elseif c == '\n'
                     println()
                 else
-                    print_with_color(:red, STDOUT, "█")
+                    print_with_color(:red, stdout, "█")
                 end
             end
             error()
@@ -138,17 +138,17 @@ module TerminalRegressionTests
         # kernel and being available to epoll. We write a sentintel value
         # here and wait for it to be read back.
         sentinel = Ref{UInt32}(0xffffffff)
-        ccall(:write, Void, (Cint, Ptr{UInt32}, Csize_t), emuterm.pty.slave, sentinel, sizeof(UInt32))
+        ccall(:write, Cvoid, (Cint, Ptr{UInt32}, Csize_t), emuterm.pty.slave, sentinel, sizeof(UInt32))
         Base.process_events(false)
         # Read until we get our sentinel
-        while nb_available(emuterm.pty.master) < sizeof(UInt32) ||
+        while bytesavailable(emuterm.pty.master) < sizeof(UInt32) ||
             reinterpret(UInt32, emuterm.pty.master.buffer.data[(emuterm.pty.master.buffer.size-3):emuterm.pty.master.buffer.size])[] != sentinel[]
             emuterm.aggressive_yield || yield()
             Base.process_events(false)
             sleep(0.01)                        
         end
         data = IOBuffer(readavailable(emuterm.pty.master)[1:(end-4)])
-        while nb_available(data) > 0
+        while bytesavailable(data) > 0
             VT100.parse!(emuterm.terminal, data)
         end
     end
