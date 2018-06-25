@@ -21,7 +21,7 @@ for test in [
     outbuf = take!(buf)
     if outbuf != output
         print_with_color(:red, "Failed test $test\n")
-        failed_tests += 1
+        global failed_tests += 1
         println(output)
         println(outbuf)
         println(String(output))

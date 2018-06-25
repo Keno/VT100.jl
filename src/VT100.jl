@@ -4,14 +4,14 @@ module VT100
 
 using ColorTypes
 using FixedPointNumbers
-using Compat
 
 const RGB8 = RGB{N0f8}
 
 export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
     parseall!
 import Base: convert, write
-import Base.Terminals: cmove_right
+import REPL
+import REPL.Terminals: cmove_right
 import Base: start, next, done, setindex!, getindex, endof
 
 module Attributes
@@ -141,7 +141,7 @@ mutable struct ScreenEmulator <: Emulator
     linedrawing::Bool
     function ScreenEmulator(width = 80, height = 24)
         this = new(Size(width, height),1,
-            Vector{String}(0),Vector{Line}(0),Cursor(1,1),Cell('\0'),
+            Vector{String}(),Vector{Line}(),Cursor(1,1),Cell('\0'),
             false, false, false)
         add_line!(this)
         this
@@ -369,7 +369,7 @@ function readdec(io)
         elseif n == 0
             return (c, -1)
         else
-            return (c, parse(Int, String(take!(decbuf)),10))
+            return (c, parse(Int, String(take!(decbuf)), base=10))
         end
         n += 1
     end
@@ -554,7 +554,7 @@ function parse!(em::Emulator, io::IO)
 end
 
 
-@static if is_unix()
+@static if Sys.isunix()
     mutable struct PTY
         em::ScreenEmulator
         master::Base.TTY
@@ -562,10 +562,9 @@ end
         fdm::RawFD
     end
 
+    const O_RDWR = Base.Filesystem.JL_O_RDWR
+    const O_NOCTTY = Base.Filesystem.JL_O_NOCTTY
     function create_pty(parse = true)
-        const O_RDWR = Base.Filesystem.JL_O_RDWR
-        const O_NOCTTY = Base.Filesystem.JL_O_NOCTTY
-
         fdm = ccall(:posix_openpt,Cint,(Cint,),O_RDWR|O_NOCTTY)
         fdm == -1 && error("Failed to open PTY master")
         rc = ccall(:grantpt,Cint,(Cint,),fdm)
@@ -582,7 +581,7 @@ end
         pty = PTY(ScreenEmulator(), master, slave, RawFD(fdm))
         parse && @async parseall!(pty.em,master)
 
-        finalizer(pty, close)
+        finalizer(close, pty)
         pty
     end
 

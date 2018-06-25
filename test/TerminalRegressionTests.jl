@@ -1,5 +1,6 @@
 module TerminalRegressionTests
     using VT100
+    import REPL
 
     function load_outputs(file)
         outputs = String[]
@@ -39,7 +40,7 @@ module TerminalRegressionTests
         outputs, decorators
     end
 
-    mutable struct EmulatedTerminal <: Base.Terminals.UnixTerminal
+    mutable struct EmulatedTerminal <: REPL.Terminals.UnixTerminal
         input_buffer::IOBuffer
         out_stream::Base.TTY
         pty::VT100.PTY
@@ -80,21 +81,21 @@ module TerminalRegressionTests
         term.waiting = false
         read(term.input_buffer, Char)
     end
-    function Base.readuntil(term::EmulatedTerminal, delim::UInt8)
+    function Base.readuntil(term::EmulatedTerminal, delim::UInt8; kwargs...)
         if bytesavailable(term.input_buffer) == 0
             term.waiting = true
             notify(term.step)
             wait(term.filled)
         end
         term.waiting = false
-        readuntil(term.input_buffer, delim)
+        readuntil(term.input_buffer, delim; kwargs...)
     end
-    Base.Terminals.raw!(t::EmulatedTerminal, raw::Bool) =
+    REPL.Terminals.raw!(t::EmulatedTerminal, raw::Bool) =
         ccall(:jl_tty_set_mode,
                  Int32, (Ptr{Cvoid},Int32),
                  t.out_stream.handle, raw) != -1
-    Base.Terminals.pipe_reader(t::EmulatedTerminal) = t.input_buffer
-    Base.Terminals.pipe_writer(t::EmulatedTerminal) = t.out_stream
+    REPL.Terminals.pipe_reader(t::EmulatedTerminal) = t.input_buffer
+    REPL.Terminals.pipe_writer(t::EmulatedTerminal) = t.out_stream
 
     function _compare(output, outbuf)
         result = outbuf == output
@@ -127,9 +128,9 @@ module TerminalRegressionTests
         VT100.dump(buf,decoratorbuf,em)
         outbuf = take!(buf)
         decoratorbuf = take!(decoratorbuf)
-        _compare(Vector{UInt8}(output), outbuf) || return false
+        _compare(Vector{UInt8}(codeunits(output)), outbuf) || return false
         decorator === nothing && return true
-        _compare(Vector{UInt8}(decorator), decoratorbuf)
+        _compare(Vector{UInt8}(codeunits(decorator)), decoratorbuf)
     end
 
     function process_all_buffered(emuterm)
@@ -145,7 +146,7 @@ module TerminalRegressionTests
             reinterpret(UInt32, emuterm.pty.master.buffer.data[(emuterm.pty.master.buffer.size-3):emuterm.pty.master.buffer.size])[] != sentinel[]
             emuterm.aggressive_yield || yield()
             Base.process_events(false)
-            sleep(0.01)                        
+            sleep(0.01)
         end
         data = IOBuffer(readavailable(emuterm.pty.master)[1:(end-4)])
         while bytesavailable(data) > 0
@@ -165,15 +166,15 @@ module TerminalRegressionTests
             f(emuterm)
             Base.notify(c)
         catch err
-            Base.showerror(STDERR, err, catch_backtrace())
+            Base.showerror(stderr, err, catch_backtrace())
             Base.notify_error(c, err)
         end
         t2 = @async try
             for input in inputs
                 wait(emuterm);
                 emuterm.aggressive_yield || @assert emuterm.waiting
-                output = shift!(outputs)
-                decorator = isempty(decorators) ? nothing : shift!(decorators)
+                output = popfirst!(outputs)
+                decorator = isempty(decorators) ? nothing : popfirst!(decorators)
                 @assert !eof(emuterm.pty.master)
                 process_all_buffered(emuterm)
                 compare(emuterm.terminal, output, decorator)
@@ -181,14 +182,14 @@ module TerminalRegressionTests
             end
             Base.notify(c)
         catch err
-            Base.showerror(STDERR, err, catch_backtrace())
+            Base.showerror(stderr, err, catch_backtrace())
             Base.notify_error(c, err)
         end
         while !istaskdone(t1) || !istaskdone(t2)
             wait(c)
         end
     end
-    
+
     function create_automated_test(f, outputpath, inputs; aggressive_yield=false)
         emuterm = EmulatedTerminal()
         emuterm.aggressive_yield = aggressive_yield
@@ -200,7 +201,7 @@ module TerminalRegressionTests
             f(emuterm)
             Base.notify(c)
         catch err
-            Base.showerror(STDERR, err, catch_backtrace())
+            Base.showerror(stderr, err, catch_backtrace())
             Base.notify_error(c, err)
         end
         t2 = @async try
@@ -229,7 +230,7 @@ module TerminalRegressionTests
             end
             Base.notify(c)
         catch err
-            Base.showerror(STDERR, err, catch_backtrace())
+            Base.showerror(stderr, err, catch_backtrace())
             Base.notify_error(c, err)
         end
         while !istaskdone(t1) || !istaskdone(t2)

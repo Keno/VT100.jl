@@ -7,5 +7,6 @@ TerminalRegressionTests.automated_test(
     print(emuterm, "Please enter your name: ")
     name = strip(readline(emuterm))
     print(emuterm, "\nHello $name. Do you like tests? ")
-    @assert strip(readline(emuterm)) == "Yes!!"
+    resp = strip(readline(emuterm))
+    @assert resp == "Yes!!"
 end
