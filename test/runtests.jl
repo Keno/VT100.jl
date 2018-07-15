@@ -20,7 +20,7 @@ for test in [
     VT100.dump(buf,devnull,em)
     outbuf = take!(buf)
     if outbuf != output
-        print_with_color(:red, "Failed test $test\n")
+        printstyled("Failed test $test\n"; color=:red)
         global failed_tests += 1
         println(output)
         println(outbuf)

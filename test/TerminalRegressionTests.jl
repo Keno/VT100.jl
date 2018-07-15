@@ -114,7 +114,7 @@ module TerminalRegressionTests
                 elseif c == '\n'
                     println()
                 else
-                    print_with_color(:red, stdout, "█")
+                    printstyled(stdout, "█", color=:red)
                 end
             end
             error()
