@@ -12,7 +12,7 @@ export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
 import Base: convert, write
 import REPL
 import REPL.Terminals: cmove_right
-import Base: start, next, done, setindex!, getindex, endof
+import Base: iterate, setindex!, getindex, lastindex
 
 module Attributes
     export Bright, Dim, Underline, Blink,
@@ -108,12 +108,10 @@ mutable struct Line
     Line() = new(Vector{Cell}(0),false)
     Line(data::Vector{Cell}) = new(data,false)
 end
-start(l::Line) = start(l.data)
-next(l::Line,i) = next(l.data,i)
-done(l::Line,i) = done(l.data,i)
+iterate(l::Line, args...) = iterate(l.data, args...)
 setindex!(l::Line, c, i) = setindex!(l.data, c, i)
 getindex(l::Line,i) = getindex(l.data,i)
-endof(l::Line) = endof(l.data)
+lastindex(l::Line) = lastindex(l.data)
 
 convert(::Type{Line}, data::Vector{Cell}) = Line(data)
 
