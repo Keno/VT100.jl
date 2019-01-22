@@ -29,6 +29,4 @@ for test in [
     end
 end
 
-include("TRTtest.jl")
-
 exit(failed_tests)

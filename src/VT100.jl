@@ -574,7 +574,7 @@ end
             ccall(:ptsname,Ptr{UInt8},(Cint,),fdm), O_RDWR|O_NOCTTY)
 
         slave  = RawFD(fds)
-        master = Base.TTY(RawFD(fdm); readable = true)
+        master = Base.TTY(RawFD(fdm))
 
         pty = PTY(ScreenEmulator(), master, slave, RawFD(fdm))
         parse && @async parseall!(pty.em,master)
