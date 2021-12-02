@@ -11,7 +11,7 @@ export ScreenEmulator, LineEmulator, Emulator, parse!, parse_cell!, Cell,
     parseall!
 import Base: convert, write
 import REPL
-import REPL.Terminals: cmove_right
+import REPL.Terminals: cmove_right, CSI
 import Base: iterate, setindex!, getindex, lastindex
 
 module Attributes
@@ -58,25 +58,42 @@ struct Cell
 end
 
 const colorlist = Dict(
-    :black      => 0,
-    :red        => 1,
-    :green      => 2,
-    :yellow     => 3,
-    :blue       => 4,
-    :magenta    => 5,
-    :cyan       => 6,
-    :white      => 7,
-    :default    => 9
+    :black         => 0,
+    :red           => 1,
+    :green         => 2,
+    :yellow        => 3,
+    :blue          => 4,
+    :magenta       => 5,
+    :cyan          => 6,
+    :light_grey    => 7,
+    :light_gray    => 7,
+    :default       => 9,
+    :dark_grey     => 60,
+    :dark_gray     => 60,
+    :light_red     => 61,
+    :light_green   => 62,
+    :light_yellow  => 63,
+    :light_blue    => 64,
+    :light_magenta => 65,
+    :light_cyan    => 66,
+    :white         => 67,
 )
 
 function Cell(c::Cell;
         content = c.content, flags = c.flags, fg = c.fg, bg = c.bg,
         attrs = c.attrs, fg_rgb = c.fg_rgb, bg_rgb = c.bg_rgb)
-    isa(fg, Symbol) && (fg = colorlist[fg]; flags & ~(FG_IS_256 | FG_IS_RGB))
-    isa(bg, Symbol) && (bg = colorlist[bg]; flags & ~(BG_IS_256 | BG_IS_RGB))
+    isa(fg, Symbol) && (fg = colorlist[fg]+30; flags & ~(FG_IS_256 | FG_IS_RGB))
+    isa(bg, Symbol) && (bg = colorlist[bg]+40; flags & ~(BG_IS_256 | BG_IS_RGB))
     Cell(content,flags,fg,bg,attrs,fg_rgb,bg_rgb)
 end
 Cell(c::Char) = Cell(c,0,0,0,0,RGB8(0,0,0),RGB8(0,0,0))
+Cell(;kwargs...) = Cell(Cell(' '); kwargs...)
+(c::Cell)(ch::Char; kwargs...) = Cell(c, content = ch; kwargs...)
+Base.convert(::Type{Cell}, c::Char) = Cell(c)
+Base.size(c::Cell) = ()
+Base.length(c::Cell) = 1
+Base.iterate(c::Cell) = c, nothing
+Base.iterate(c::Cell, _) = nothing
 
 # Encode x information if foreground color, y information in background color
 # r encodes the lowest 8 bits, g the next, b the hight bits
@@ -108,6 +125,8 @@ mutable struct Line
     Line() = new(Vector{Cell}(0),false)
     Line(data::Vector{Cell}) = new(data,false)
 end
+Base.length(l::Line) = length(l.data)
+Base.resize!(l::Line, n::Int) = resize!(l.data, n)
 iterate(l::Line, args...) = iterate(l.data, args...)
 setindex!(l::Line, c, i) = setindex!(l.data, c, i)
 getindex(l::Line,i) = getindex(l.data,i)
@@ -125,7 +144,7 @@ struct Size
     height::Int
 end
 
-abstract type Emulator end
+abstract type Emulator <: AbstractArray{Cell, 2} end
 
 mutable struct ScreenEmulator <: Emulator
     ViewPortSize::Size
@@ -145,9 +164,10 @@ mutable struct ScreenEmulator <: Emulator
         this
     end
 end
+Base.size(s::ScreenEmulator) = (s.ViewPortSize.height, s.ViewPortSize.width)
 create_cell(em::ScreenEmulator,c::Char) = Cell(em.cur_cell, content = c)
 cur_cell(em::ScreenEmulator) = em.cur_cell
-set_cur_cell(em::ScreenEmulator,c::Cell) = em.cur_cell = c
+set_cur_cell!(em::ScreenEmulator,c::Cell) = em.cur_cell = c
 function cmove(em::ScreenEmulator, line, col)
     em.debug && println("Moving to $line:$col")
     targetline = em.firstline-1+line
@@ -176,6 +196,34 @@ end
 function cmove_up(em::ScreenEmulator, n)
     em.debug && println("Moving $n down")
     em.cursor = Cursor(em.cursor.line - n, em.cursor.column)
+end
+
+function Base.getindex(em::ScreenEmulator, row::Int, col::Int)
+    if col > em.ViewPortSize.width
+        throw(BoundsError(em, row, col))
+    end
+    thisrow = em.lines[row]
+    l = length(thisrow)
+    if l < col
+        fill_space!(thisrow, l+1, col)
+    end
+    return thisrow[col]
+end
+
+function Base.setindex!(em::ScreenEmulator, c::Union{Cell, Char}, line::Int, col::Int)
+    if col > em.ViewPortSize.width
+        throw(BoundsError(em, line, col))
+    end
+    while line > length(em.lines)
+        add_line!(em)
+    end
+    thisrow = em.lines[line]
+    l = length(thisrow)
+    if l < col
+        fill_space!(thisrow, l+1, col)
+    end
+    thisrow[col] = c
+    return thisrow[col]
 end
 
 # An emulator that works a line at a time and does not support screen movement
@@ -255,15 +303,61 @@ const ExtendedContents = String[]
 
 # Render the contents of this emulator into another terminal.
 function render(term::IO, em::Emulator)
-    dump(term,devnull,em)
+    buf = IOBuffer()
+    dump(buf,devnull,em, render_content_decorators=true)
+    write(term, take!(buf))
+end
+
+function change_color(buf, is_fg, flags, color, rgb, is_256, is_rgb)
+    write(buf,CSI)
+    if (flags & is_256) != 0
+        write(buf, is_fg ? '3' : '4', "8;5;",string(color))
+    elseif (flags & is_rgb) != 0
+        write(buf, is_fg ? '3' : '4', "8;2;",string(rgb.r.i),';',
+                          string(rgb.g.i),';',
+                          string(rgb.b.i))
+    else
+        write(buf,string(color))
+    end
+    write(buf,'m')
+end
+
+function change_fg_color(buf, cell)
+    change_color(buf, true, cell.flags, cell.fg, cell.fg_rgb, FG_IS_256, FG_IS_RGB)
+end
+
+function change_bg_color(buf, cell)
+    change_color(buf, false, cell.flags, cell.bg, cell.bg_rgb, BG_IS_256, BG_IS_RGB)
+end
+
+function change_attrs(buf, want, have)
+    # If we are clearing any bits
+    if (want & IsACS) != (have & IsACS)
+        write(buf,(want & IsACS) == 0 ? "\e(B" : "\e(0")
+    end
+    if (have & ~want) != 0
+        write(buf,CSI,"0m")
+        have = 0
+    end
+    if (want & Bright) != 0
+        write(buf,CSI,"1m")
+    end
+end
+
+function switch_cell_attrs(buf,wantc,attrs)
+    (wantc.bg != attrs.bg || wantc.bg_rgb != attrs.bg_rgb) && change_bg_color(buf,wantc)
+    (wantc.fg != attrs.fg || wantc.fg_rgb != attrs.fg_rgb) && change_fg_color(buf,wantc)
+    (wantc.attrs != attrs.attrs) && change_attrs(buf,wantc.attrs,attrs.attrs)
+    wantc
 end
 
 # Dump the emulator contents as a plain-contents text file and a decorator file
 # Intended mostly for regression testing.
 const default_decorators = ['A':'z';'a':'z';'0':'9']
 function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing, decorator_map = Dict{Cell,Char}(),
-        available_decorators = copy(default_decorators))
+        available_decorators = copy(default_decorators); render_content_decorators=false)
     first = true
+    attrs = Cell()
     for line in (lines === nothing ? em.lines : em.lines[lines])
         if first
             first = false
@@ -273,6 +367,9 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing, decora
         end
         for cell in line
             c = cell.content
+            if render_content_decorators
+                attrs = switch_cell_attrs(contents, cell, attrs)
+            end
             if c < '\Uf0000'
                 write(contents,c)
             else
@@ -286,6 +383,9 @@ function dump(contents::IO, decorator::IO, em::Emulator, lines = nothing, decora
             end
             write(decorator, decorator_map[template])
         end
+    end
+    if render_content_decorators
+        switch_cell_attrs(contents, Cell(), attrs)
     end
 end
 
@@ -306,7 +406,7 @@ function insert_cell!(em, pos, c::Cell)
     if pos > em.ViewPortSize.width
         # Fill the remainder of this line with spaces
         fill_space!(line, l+1, em.ViewPortSize.width)
-        # Remember that this line was wrapper
+        # Remember that this line was wrapped
         line.wrapped = true
         insert_line!(em)
         cmove_down(em, 1); cmove_col(em, 1)
@@ -433,9 +533,9 @@ function parseSGR!(em::Emulator, params)
                 error("Incorrect SGR sequence")
             end
         elseif 90 <= f1 <= 97
-            set_cur_cell(em,Cell(cell,fg = f1-90, attrs=cell.attrs | Bright))
+            set_cur_cell(em,Cell(cell,fg = f1, attrs=cell.attrs))
         elseif 100 <= f1 <= 107
-            set_cur_cell(em,Cell(cell,fg = f1-100, attrs=cell.attrs | Bright))
+            set_cur_cell(em,Cell(cell,bg = f1, attrs=cell.attrs))
         else
             error("Unimplemented CSIm $f1")
         end
