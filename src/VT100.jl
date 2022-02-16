@@ -342,6 +342,9 @@ function change_attrs(buf, want, have)
     if (want & Bright) != 0
         write(buf,CSI,"1m")
     end
+    if (want & Underline) != 0
+        write(buf,CSI,"4m")
+    end
 end
 
 function switch_cell_attrs(buf,wantc,attrs)
@@ -448,7 +451,7 @@ end
 # Writing characters (non-control)
 function write(em::ScreenEmulator, c::Char)
     em.debug && println(c,"Writing ",repr(c))
-    write(em,Cell(c))
+    write(em, Cell(em.cur_cell, content=c))
 end
 
 # Parsing
