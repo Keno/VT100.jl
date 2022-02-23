@@ -237,7 +237,7 @@ end
 create_cell(em::LineEmulator,c::Char) = Cell(em.cur_cell, content = c)
 write(em::LineEmulator, c) = 1
 cur_cell(em::LineEmulator) = em.cur_cell
-set_cur_cell(em::LineEmulator,c::Cell) = em.cur_cell = c
+set_cur_cell!(em::LineEmulator,c::Cell) = em.cur_cell = c
 insert_line!(em::LineEmulator) = nothing
 cmove_down(em::LineEmulator,_) = nothing
 
@@ -498,47 +498,49 @@ function parseSGR!(em::Emulator, params)
         f1 = params[idx]
         if f1 == 0
             em.debug && println("Change color to default")
-            set_cur_cell(em,Cell(Cell('\0'),fg=9,bg=9))
+            set_cur_cell!(em,Cell(Cell('\0'),fg=9,bg=9))
         elseif f1 == 1
-            set_cur_cell(em,Cell(cell,attrs=cell.attrs | Bright))
+            set_cur_cell!(em,Cell(cell,attrs=cell.attrs | Bright))
         elseif f1 == 4
-            set_cur_cell(em,Cell(cell,attrs=cell.attrs | Underline))
+            set_cur_cell!(em,Cell(cell,attrs=cell.attrs | Underline))
         elseif f1 == 22
-            set_cur_cell(em,Cell(cell,attrs=cell.attrs & ~(Bright | Dim)))
+            set_cur_cell!(em,Cell(cell,attrs=cell.attrs & ~(Bright | Dim)))
+        elseif f1 == 24
+            set_cur_cell!(em,Cell(cell,attrs=cell.attrs & ~Underline))
         elseif 30 <= f1 <= 37 || f1 == 39
             em.debug && println("Change fg color")
-            set_cur_cell(em,Cell(cell,fg = f1-30))
+            set_cur_cell!(em,Cell(cell,fg = f1-30))
         elseif f1 == 38
             idx += 2
             f2, f3 = params[(idx-1):idx]
             if f2 == 2
                 idx += 2
                 f4, f5 = params[(idx-1):idx]
-                set_cur_cell(em,Cell(cell, fg_rgb = RGB8(N0f8(f3,0), N0f8(f4,0), N0f8(f5,0)), flags=cell.flags | FG_IS_RGB))
+                set_cur_cell!(em,Cell(cell, fg_rgb = RGB8(N0f8(f3,0), N0f8(f4,0), N0f8(f5,0)), flags=cell.flags | FG_IS_RGB))
             elseif f2 == 5
-                set_cur_cell(em,Cell(cell, fg = f3, flags=cell.flags | FG_IS_256))
+                set_cur_cell!(em,Cell(cell, fg = f3, flags=cell.flags | FG_IS_256))
             else
                 error("Incorrect SGR sequence")
             end
         elseif 40 <= f1 <= 47 || f1 == 49
             em.debug && println("Change bg color")
-            set_cur_cell(em,Cell(cell,bg = f1-40))
+            set_cur_cell!(em,Cell(cell,bg = f1-40))
         elseif f1 == 48
             idx += 2
             f2, f3 = params[(idx-1):idx]
             if f2 == 2
                 idx += 2
                 f4, f5 = params[(idx-1):idx]
-                set_cur_cell(em,Cell(cell, bg_rgb = RGB8(N0f8(f3,0), N0f8(f4,0), N0f8(f5,0)), flags=cell.flags | BG_IS_RGB))
+                set_cur_cell!(em,Cell(cell, bg_rgb = RGB8(N0f8(f3,0), N0f8(f4,0), N0f8(f5,0)), flags=cell.flags | BG_IS_RGB))
             elseif f2 == 5
-                set_cur_cell(em,Cell(cell, bg = f3, flags=cell.flags | BG_IS_256))
+                set_cur_cell!(em,Cell(cell, bg = f3, flags=cell.flags | BG_IS_256))
             else
                 error("Incorrect SGR sequence")
             end
         elseif 90 <= f1 <= 97
-            set_cur_cell(em,Cell(cell,fg = f1, attrs=cell.attrs))
+            set_cur_cell!(em,Cell(cell,fg = f1, attrs=cell.attrs))
         elseif 100 <= f1 <= 107
-            set_cur_cell(em,Cell(cell,bg = f1, attrs=cell.attrs))
+            set_cur_cell!(em,Cell(cell,bg = f1, attrs=cell.attrs))
         else
             error("Unimplemented CSIm $f1")
         end
