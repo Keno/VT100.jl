@@ -505,6 +505,8 @@ function parseSGR!(em::Emulator, params)
             set_cur_cell!(em,Cell(cell,attrs=cell.attrs | Underline))
         elseif f1 == 22
             set_cur_cell!(em,Cell(cell,attrs=cell.attrs & ~(Bright | Dim)))
+        elseif f1 == 24
+            set_cur_cell!(em,Cell(cell,attrs=cell.attrs & ~Underline))
         elseif 30 <= f1 <= 37 || f1 == 39
             em.debug && println("Change fg color")
             set_cur_cell!(em,Cell(cell,fg = f1-30))
