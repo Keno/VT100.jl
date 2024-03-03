@@ -469,7 +469,6 @@ end
 @enum State char color
 
 const decbuf = IOBuffer()
-sizehint!(decbuf.data,5)
 
 function readdec(io)
     truncate(decbuf, 0)
