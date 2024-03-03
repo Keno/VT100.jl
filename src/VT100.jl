@@ -122,7 +122,7 @@ end
 mutable struct Line
     data::Vector{Cell}
     wrapped::Bool
-    Line() = new(Vector{Cell}(0),false)
+    Line() = new(Cell[],false)
     Line(data::Vector{Cell}) = new(data,false)
 end
 Base.length(l::Line) = length(l.data)
@@ -181,6 +181,10 @@ function cmove_right(em::ScreenEmulator, n)
     em.debug && println("Moving $n right")
     em.cursor = Cursor(em.cursor.line, em.cursor.column+n)
 end
+function cmove_left(em::ScreenEmulator, n)
+    em.debug && println("Moving $n left")
+    em.cursor = Cursor(em.cursor.line, em.cursor.column-n)
+end
 function cmove_col(em::ScreenEmulator, n)
     if n == 0
         em.warn && println(stderr, "BAD DATA: Columns are 1 indexed.")
@@ -197,10 +201,18 @@ function cmove_up(em::ScreenEmulator, n)
     em.debug && println("Moving $n down")
     em.cursor = Cursor(em.cursor.line - n, em.cursor.column)
 end
+function cmove_line_down(em::ScreenEmulator, n)
+    em.debug && println("Moving $n lines down")
+    em.cursor = Cursor(em.cursor.line + n, 1)
+end
+function cmove_line_up(em::ScreenEmulator, n)
+    em.debug && println("Moving $n lines up")
+    em.cursor = Cursor(em.cursor.line - n, 1)
+end
 
 function Base.getindex(em::ScreenEmulator, row::Int, col::Int)
     if col > em.ViewPortSize.width
-        throw(BoundsError(em, row, col))
+        throw(BoundsError(em, (row, col)))
     end
     thisrow = em.lines[row]
     l = length(thisrow)
@@ -212,7 +224,7 @@ end
 
 function Base.setindex!(em::ScreenEmulator, c::Union{Cell, Char}, line::Int, col::Int)
     if col > em.ViewPortSize.width
-        throw(BoundsError(em, line, col))
+        throw(BoundsError(em, (line, col)))
     end
     while line > length(em.lines)
         add_line!(em)
@@ -267,7 +279,6 @@ function erase_tos(em)
     for i in (em.firstline):(em.cursor.line-1)
         erase_line(em,i)
     end
-    erase(eol)
 end
 function erase_screen(em)
     for i in (em.firstline):(em.firstline + em.ViewPortSize.height)
@@ -575,7 +586,7 @@ function parse!(em::Emulator, io::IO)
                 elseif c == 'r'
                     # error("TODO: DECSTBM")
                 else
-                    error("TODO: $(hex(c))")
+                    error("TODO: $(UInt8(c))")
                 end
             elseif c == '?'
                 (c,f2) = readdec(io)
@@ -643,7 +654,7 @@ function parse!(em::Emulator, io::IO)
             error("Unhandled escape sequence starting with $c")
         end
     else
-        if em.linedrawing && c < 0xff
+        if em.linedrawing && UInt8(c) < 0xff
             cell = create_cell(em,LineDrawing[UInt8(c)+1])
             write(em, cell)
             return cell
